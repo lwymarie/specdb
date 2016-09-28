@@ -223,6 +223,7 @@ class QueryCatalog(object):
         sep = coord.separation(self.coords)
         # Match
         good = sep < radius
+        print('good=',good)
         # Return
         if verbose:
             print("Your search yielded {:d} match[es]".format(np.sum(good)))
