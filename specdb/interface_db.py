@@ -34,7 +34,7 @@ class InterfaceDB(object):
       Used to grab data from a given survey
     """
 
-    def __init__(self, db_file, maximum_ram=10.,verbose=True):
+    def __init__(self, db_file, maximum_ram=10., verbose=True):
         """
         Parameters
         ----------
@@ -101,6 +101,7 @@ class InterfaceDB(object):
           bool array of meta rows from the survey matching IGM_IDs
 
         """
+        print('in grab_ids, private=',private)
         # Check
         if survey not in self.hdf.keys():
             raise IOError("Survey {:s} not in your DB file {:s}".format(survey, self.db_file))

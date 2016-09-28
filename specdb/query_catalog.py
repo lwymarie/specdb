@@ -161,8 +161,6 @@ class QueryCatalog(object):
         # Match
         idx, d2d, d3d = match_coordinates_sky(self.coords, cat_coords, nthneighbor=1)
         good = d2d < toler
-        print('good=')
-        print(good)
         # Return
         if verbose:
             print("Your search yielded {:d} matches".format(np.sum(good)))
@@ -223,12 +221,10 @@ class QueryCatalog(object):
         sep = coord.separation(self.coords)
         # Match
         good = sep < radius
-        print('good=',good)
         # Return
         if verbose:
             print("Your search yielded {:d} match[es]".format(np.sum(good)))
-            print(self.cat['IGM_ID'][good])
-        return self.cat['IGM_ID'][good]
+        return self.cat['PRIV_ID'][good]
 
     def get_cat(self, IGM_IDs):
         """ Grab catalog rows corresponding to the input IDs
