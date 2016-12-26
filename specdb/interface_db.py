@@ -34,7 +34,7 @@ class InterfaceDB(object):
       Used to grab data from a given survey
     """
 
-    def __init__(self, db_file, maximum_ram=10.,verbose=True):
+    def __init__(self, db_file, maximum_ram=10.,verbose=True, **kwargs):
         """
         Parameters
         ----------

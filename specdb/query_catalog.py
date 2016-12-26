@@ -34,7 +34,7 @@ class QueryCatalog(object):
       List of surveys included in the catalog
     """
 
-    def __init__(self, db_file=None, maximum_ram=10.):
+    def __init__(self, db_file=None, maximum_ram=10., **kwargs):
         """
         Returns
         -------
@@ -44,7 +44,7 @@ class QueryCatalog(object):
         self.cat = None
         self.surveys = None
         # Load catalog
-        self.load_cat(db_file)
+        self.load_cat(db_file, **kwargs)
         # Setup
         self.setup()
 
