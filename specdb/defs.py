@@ -56,6 +56,8 @@ def instruments():
         'NIRI': dict(gratings=['Hgrism_G5203','Kgrism_G5204']),
         # UKST
         '2dF': dict(gratings=['300B']),
+        # FUSE
+        'FUSE': dict(gratings=['LWRS']),
         # HST
         'ACS': dict(gratings=['PR200L']),
         'WFC3': dict(gratings=['G280']),
@@ -65,6 +67,7 @@ def instruments():
                                'G140M', 'G160M', 'G270M', 'G230M',
                                'G230MB', 'G430M', 'G750M', 'G230L',
                                'G230LB', 'G430L', 'G750L']),
+        'GHRS': dict(gratings=['ECH-A', 'ECH-B', 'G160M', 'G200M', 'G270M', 'G140L']),
         # VLT
         'XSHOOTER': dict(gratings=['UVB,VIS,NIR,ALL']),
         'ISAAC': dict(gratings=['SW_MRes']),
@@ -152,7 +155,7 @@ def get_db_table_format(extras=None):
 
     # Dict for Table
     idict = dict(RA=0., DEC=0., zem=0., sig_zem=0.,
-                 flag_zem=dummyf, flag_survey=0, STYPE=dummys)
+                 flag_zem=dummyf, flag_group=0, STYPE=dummys)
     # Extras
     if extras is not None:
         for key,item in extras.items():
@@ -203,10 +206,10 @@ def get_res_dicts():
     NIRI_Rdict = {'Hgrism_G5203': 940.,    # Assumes 4 pixels
                   'Kgrism_G5204': 780.,    # Assumes 4 pixels
                   }
-    FUSE_Rdict = {'LWRS_LIF2B': 20000.,    # Assumes 4 pixels
-                  'LWRS_LIF1B': 20000.,    # Assumes 4 pixels
-                  'LWRS_LIF1A': 20000.,    # Assumes 4 pixels
-                  'LWRS_LIF2A': 20000.,    # Assumes 4 pixels
+    FUSE_Rdict = {'LWRS_LIF2B': 20000.,
+                  'LWRS_LIF1B': 20000.,
+                  'LWRS_LIF1A': 20000.,
+                  'LWRS_LIF2A': 20000.,
                   'LWRS_SIC1A': 20000.,
                   'LWRS_SIC2A': 20000.,
                   'LWRS_SIC1B': 20000.,
@@ -226,16 +229,17 @@ def get_res_dicts():
                   'G430M': 2000.,
                   'G750M': 2000.,
                   'G140L': 2000.,
-                  'G230L': 2000.,
-                  'G230LB': 2000.,
+                  'G230L': 740.,
+                  'G230LB': 910.,
                   'G430L': 2000.,
                   'G750L': 2000.,
                   }
-    GHRS_Rdict = {'ECH-A': 100000.,    # Assumes 4 pixels
-                  'ECH-B': 100000.,    # Assumes 4 pixels
-                  'G160M': 20000.,    # Assumes 4 pixels
-                  'G200M': 20000.,    # Assumes 4 pixels
-                  'G270M': 20000.,    # Assumes 4 pixels
+    GHRS_Rdict = {'ECH-A': 100000.,
+                  'ECH-B': 100000.,
+                  'G160M': 20000.,
+                  'G200M': 20000.,
+                  'G270M': 20000.,
+                  'G140L': 2000.,
                  }
     #
     Rdicts = dict(ESI=ESI_Rdict, HIRES=HIRES_Rdict,
@@ -302,8 +306,8 @@ def get_req_clms(sdb_key=None):
     req_clms : list
       List of required columns for meta data
     """
-    req_clms = ['RA', 'DEC', 'EPOCH', 'zem', 'R', 'WV_MIN',
-            'WV_MAX', 'DATE-OBS', 'SURVEY_ID', 'NPIX', 'SPEC_FILE',
+    req_clms = ['RA_GROUP', 'DEC_GROUP', 'EPOCH', 'zem_GROUP', 'R', 'WV_MIN',
+            'WV_MAX', 'DATE-OBS', 'GROUP_ID', 'NPIX', 'SPEC_FILE',
             'INSTR', 'GRATING', 'TELESCOPE']
     if sdb_key is not None:
         req_clms += [sdb_key]
