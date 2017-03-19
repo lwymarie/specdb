@@ -170,7 +170,7 @@ class InterfaceGroup(object):
         cut_meta = self.meta[rows]
         return cut_meta
 
-    def grab_specmeta(self, rows, verbose=None, **kwargs):
+    def grab_specmeta(self, rows, **kwargs):
         """
         Parameters
         ----------
@@ -187,6 +187,7 @@ class InterfaceGroup(object):
         """
         if isinstance(rows, int):
             rows = np.array([rows])  # Insures meta and other arrays are proper
+        verbose = kwargs['verbose']
         if verbose is None:
             verbose = self.verbose
         # Check memory

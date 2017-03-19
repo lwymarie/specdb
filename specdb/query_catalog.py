@@ -46,7 +46,7 @@ class QueryCatalog(object):
         # Init
         self.verbose = verbose
         # Load catalog
-        self.load_cat(hdf)
+        self.load_cat(hdf, **kwargs)
         # Setup
         self.setup()
 
@@ -138,7 +138,8 @@ class QueryCatalog(object):
         ids = self.radial_search(coord, tol, **kwargs)
         if len(ids) == 0:
             warnings.warn("No sources found at your coordinate within tol={:g}.  Returning None".format(tol))
-            return None, None
+            #return None, None
+            return None
         elif len(ids) > 1:
             if closest:
                 warnings.warn("Found multiple sources in the catalog. Taking the closest one")

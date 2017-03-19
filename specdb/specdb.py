@@ -173,6 +173,8 @@ class SpecDB(object):
         -------
 
         """
+        if ID is None:
+            return (None,None)
         # Restrict groups searched according to user input
         if groups is None:
             groups = self.groups
