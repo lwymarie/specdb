@@ -16,6 +16,12 @@ from linetools import utils as ltu
 
 from specdb import defs
 from specdb.cat_utils import match_ids
+from specdb.utils import clean_vstack
+
+try:
+    bstr = bytes
+except NameError:  # For Python 2
+    bstr = str
 
 def add_ids(maindb, meta, flag_g, tkeys, idkey, first=False, **kwargs):
     """ Add IDs to
@@ -91,7 +97,7 @@ def add_to_flag(cur_flag, add_flag):
         return cur_flag
 
 
-def add_to_group_dict(group_name, gdict):
+def add_to_group_dict(group_name, gdict, skip_for_debug=False):
     """ Add input group_name to the group dict
     Done in place
 
@@ -107,7 +113,8 @@ def add_to_group_dict(group_name, gdict):
       New bitwise flag
     """
     if group_name in gdict.keys():
-        raise IOError("Group already exists in group dict.  Should not be here..")
+        if not skip_for_debug:
+            raise IOError("Group already exists in group dict.  Should not be here..")
     # Find new flag
     if len(list(gdict.keys())) == 0: # First one
         new_flag = 1
@@ -214,16 +221,11 @@ def chk_meta(meta, chk_cat_only=False):
         except:
             print("Bad DATE-OBS formatting")
             chk = False
-        # Check for unicode
-        for key in meta_keys:
-            if 'unicode' in meta[key].dtype.name:
-                warnings.warn("unicode in column {:s}.  Will convert to str for hdf5".format(key))
-                tmp = Column(meta[key].data.astype(str), name=key)
-                meta.remove_column(key)
-                meta[key] = tmp
+        # Clean
+        clean_table_for_hdf(meta)
         # Check instrument
         meta_instr = meta['INSTR'].data
-        db_instr = np.array(inst_dict.keys()).astype(str)
+        db_instr = np.array(list(inst_dict.keys())).astype(str)
         if not np.all(np.in1d(meta_instr, db_instr)):
             print("Bad instrument in meta data")
             chk = False
@@ -234,6 +236,66 @@ def chk_meta(meta, chk_cat_only=False):
     # Return
     return chk
 
+
+def chk_vstack(hdf):
+    """ Check whether the meta data in a specdb database can
+    be stacked with specdb.utils.clean_vstack
+
+    Parameters
+    ----------
+    hdf : HDF5 pointer
+
+    Returns
+    -------
+    chk : bool
+
+    """
+    meta_tables = []
+    labels = []
+    for key in hdf.keys():
+        try:
+            meta = Table(hdf[key]['meta'].value)
+        except (KeyError,ValueError):
+            print("Skipping data group {:s}".format(key))
+        else:
+            # Save a snippet
+            meta_tables.append(meta[0:1])
+            labels.append(key)
+    # Try to stack
+    try:
+        stack = clean_vstack(meta_tables, labels)
+    except:
+        chk = False
+    else:
+        print("Passing chk_vstack...")
+        chk = True
+    # Return
+    return chk
+
+
+def clean_table_for_hdf(tbl):
+    """ Prepare an input table for writing in an HDF5 object
+    Cleans unicode
+
+    Parameters
+    ----------
+    tbl : Table
+
+    Returns
+    -------
+    tbl is modified in place
+
+    """
+    #
+    tbl_keys = tbl.keys()
+    for key in tbl_keys:
+        # Check for unicode
+        #if 'unicode' in tbl[key].dtype.name:
+        if 'U' in tbl[key].dtype.__repr__():
+            warnings.warn("unicode in column {:s}.  Will convert to str for hdf5".format(key))
+            tmp = Column(tbl[key].data.astype(bstr), name=key)
+            tbl.remove_column(key)
+            tbl[key] = tmp
 
 def get_new_ids(maindb, newdb, idkey, chk=True, mtch_toler=None, pair_sep=0.5*u.arcsec,
                 close_pairs=False):
@@ -250,6 +312,8 @@ def get_new_ids(maindb, newdb, idkey, chk=True, mtch_toler=None, pair_sep=0.5*u.
       Key for ID
     mtch_toler : Quantity, optional
       Matching tolerance;  typically taken from the default
+    pair_sep : Angle, optional
+      Sepration at which a pair is considered 'real'
     close_pairs : bool, optional
       Input list includes close pairs (i.e. within mtch_toler)
 
@@ -271,7 +335,6 @@ def get_new_ids(maindb, newdb, idkey, chk=True, mtch_toler=None, pair_sep=0.5*u.
     pidx1, pidx2, pd2d, _ = c_new.search_around_sky(c_new, mtch_toler)
     pairs = pd2d > pair_sep
     if np.sum(pairs) and (not close_pairs):
-        pdb.set_trace()
         print ("Input catalog includes pairs closer than {:g} and wider than {:g}".format(mtch_toler, pair_sep))
         raise IOError("Use close_pairs=True if appropriate")
     # Find new sources (ignoring pairs at first)
@@ -286,12 +349,14 @@ def get_new_ids(maindb, newdb, idkey, chk=True, mtch_toler=None, pair_sep=0.5*u.
         not_pair_match = pd2d > pair_sep
         # Reset new -- It will get a new ID below -- np.where is needed to actually set new
         new[pidx1[pairs][np.where(not_pair_match)[0]]] = True
-    nnew = np.sum(new)
     # New IDs
-    if nnew > 0:
-        new_idx = np.where(new)[0]
-        newID = np.max(maindb[idkey])
-
+    nnew = np.sum(new)
+    new_idx = np.where(new)[0]
+    newID = np.max(maindb[idkey])
+    # Ingest
+    if nnew == 1:
+        IDs[new_idx] = newID + 1
+    elif nnew > 1: # Deal with duplicates
         sub_c_new = c_new[new]
         dup_idx, dup_d2d, _ = match_coordinates_sky(sub_c_new, sub_c_new, nthneighbor=2)
         if close_pairs:
@@ -354,13 +419,14 @@ def init_data(npix, include_co=False):
     # Return
     return data
 
-def set_new_ids(maindb, newdb, idkey, chk=True, first=False, **kwargs):
+
+def set_new_ids(maindb, meta, idkey, chk=True, first=False, **kwargs):
     """ Set the new IDs
 
     Parameters
     ----------
     maindb
-    newdb
+    meta : Table
     idkey : str
     toler
     chk
@@ -375,7 +441,7 @@ def set_new_ids(maindb, newdb, idkey, chk=True, first=False, **kwargs):
     ids : ID values of newdb
     """
     # IDs
-    ids = get_new_ids(maindb, newdb, idkey, **kwargs) # Includes new and old
+    ids = get_new_ids(maindb, meta, idkey, **kwargs) # Includes new and old
     # Crop to rows with new IDs
     if first:
         new = ids >= 0
@@ -385,11 +451,11 @@ def set_new_ids(maindb, newdb, idkey, chk=True, first=False, **kwargs):
     # Need unique
     uni, idx_uni = np.unique(ids[newi], return_index=True)
     #
-    cut_db = newdb[newi[idx_uni]]
+    cut_db = meta[newi[idx_uni]]
     cut_db.add_column(Column(ids[newi[idx_uni]], name=idkey))  # Assumes ordered by ID which is true
     # Reset IDs to all positive
     ids = np.abs(ids)
-    newdb[idkey] = ids
+    meta[idkey] = ids
     #
     return cut_db, new, ids
 
@@ -539,6 +605,18 @@ def set_resolution(head, instr=None):
         raise IOError("Not read for this instrument")
 
 
+def set_sv_idkey(idkey):
+    """ Set the idkey in the event that it was not set by
+     calling start_maindb
+
+    Parameters
+    ----------
+    idkey : str
+
+    """
+    global sv_idkey
+    sv_idkey = idkey
+
 def start_maindb(idkey, **kwargs):
     """ Start the main DB catalog
 
@@ -554,7 +632,7 @@ def start_maindb(idkey, **kwargs):
     sv_idkey = idkey
     #
     idict = defs.get_db_table_format(**kwargs)
-    tkeys = idict.keys()
+    tkeys = list(idict.keys())
     lst = [[idict[tkey]] for tkey in tkeys]
     maindb = Table(lst, names=tkeys)
     # ID_key -- should be unique to the database
@@ -564,7 +642,8 @@ def start_maindb(idkey, **kwargs):
     return maindb, tkeys
 
 
-def write_hdf(hdf, dbname, maindb, zpri, gdict, version, epoch=2000.):
+def write_hdf(hdf, dbname, maindb, zpri, gdict, version, epoch=2000.,
+              spaceframe='ICRS', **kwargs):
     """
     Parameters
     ----------
@@ -573,7 +652,9 @@ def write_hdf(hdf, dbname, maindb, zpri, gdict, version, epoch=2000.):
     maindb
     zpri
     gdict
-    version
+    version : str
+    epoch : float, optional
+    spaceframe : str, optional
 
     Returns
     -------
@@ -582,13 +663,20 @@ def write_hdf(hdf, dbname, maindb, zpri, gdict, version, epoch=2000.):
     import json
     import datetime
     # Write
+    clean_table_for_hdf(maindb)
     hdf['catalog'] = maindb
-    hdf['catalog'].attrs['NAME'] = str(dbname)
+    hdf['catalog'].attrs['NAME'] = str.encode(dbname)
     hdf['catalog'].attrs['EPOCH'] = epoch
+    hdf['catalog'].attrs['EQUINOX'] = epoch
+    hdf['catalog'].attrs['SpaceFrame'] = str.encode(spaceframe)
     hdf['catalog'].attrs['Z_PRIORITY'] = zpri
     hdf['catalog'].attrs['GROUP_DICT'] = json.dumps(ltu.jsonify(gdict))
-    hdf['catalog'].attrs['CREATION_DATE'] = str(datetime.date.today().strftime('%Y-%b-%d'))
-    hdf['catalog'].attrs['VERSION'] = version
+    hdf['catalog'].attrs['CREATION_DATE'] = str.encode(datetime.date.today().strftime('%Y-%b-%d'))
+    hdf['catalog'].attrs['VERSION'] = str.encode(version)
+    # kwargs
+    for key in kwargs:
+        hdf['catalog'].attrs[str.encode(key)] = kwargs[key]
+    # Close
     hdf.close()
 
 

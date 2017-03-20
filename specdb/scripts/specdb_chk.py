@@ -14,8 +14,8 @@ except NameError:
 def parser(options=None):
     import argparse
     # Parse
-    parser = argparse.ArgumentParser(description='Check a specdb DB file')
-    parser.add_argument("db_file", type=str, help="Database file")
+    parser = argparse.ArgumentParser(description='Check a specdb DB file [v1.1]')
+    parser.add_argument("db_file", type=str, help="specdb Database file (expecting an HDF5 file)")
     #parser.add_argument("-v", "--version", default='v01', help="DB version to generate")
     #parser.add_argument("-v", "--version", default='v01', help="DB version to generate")
     #parser.add_argument("-llist", default='ISM', action='store_true', help="Name of LineList:  ISM, HI, H2, CO, etc.")
@@ -52,7 +52,7 @@ def main(pargs):
         warnings.warn('DB file has no name.  Must be really old.')
         dbname = None
     else:
-        print("specdb DB file is from the {:s} database".format(dbname))
+        print("specdb DB file is from the {:s} database".format(str(dbname)))
 
     # Check Creation Date
     try:
@@ -62,24 +62,38 @@ def main(pargs):
         return
     else:
         version = hdf['catalog'].attrs['VERSION']
-        print("specdb DB file version={:s} was created on {:s}".format(version,cdate))
+        print("specdb DB file version={} was created on {}".format(str(version),str(cdate)))
         if dbname is not None:
             try:
-                print("Latest version for specdb DB type={:s} is version={:s}".format(
-                        dbname, dbinfo[dbname]['latest_version']))
+                print("Latest version for specdb DB type={} is version={}".format(
+                        dbname, str(dbinfo[dbname]['latest_version'])))
             except KeyError:
-                print("No version version history for {:s}".format(dbname))
+                print("No version version history for {:s}".format(str(dbname)))
             else:
                 # Check
-                print("Latest creation date for this DB version was {:s}".format(
+                print("Latest creation date for this DB version was {}".format(
                     dbinfo[dbname][version]['newest_date']))
-                print("Oldest valid DB file for this DB version was {:s}".format(
+                print("Oldest valid DB file for this DB version was {}".format(
                         dbinfo[dbname][version]['oldest_ok_date']))
                 # Compare?
 
+    # Sources and spectra
+    print("-------------------------------------------------")
+    print("There are {:d} unique sources in the source catalog".format(len(hdf['catalog'].value)))
+
     # List datasets
+    nspec = 0
     for key in hdf.keys():
+        if key == 'catalog':
+            continue
         print("Dataset: {:s}".format(key))
+        # Spectra
+        try:
+            nspec += hdf[key]['spec'].size
+        except:
+            pass
+
+    print("There are a total of {:d} spectra in the database".format(nspec))
 
 ##
 if __name__ == '__main__':

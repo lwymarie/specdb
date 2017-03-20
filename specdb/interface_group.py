@@ -16,7 +16,7 @@ from linetools.spectra.xspectrum1d import XSpectrum1D
 
 from specdb.cat_utils import match_ids
 from specdb.group_utils import show_group_meta
-
+from specdb import utils as spdbu
 
 class InterfaceGroup(object):
     """ A Class for interfacing with the DB
@@ -39,7 +39,10 @@ class InterfaceGroup(object):
         """
         Parameters
         ----------
-        db_file : str, optional
+        hdf : h5py.File object
+        group : str
+        idkey : str
+
         Returns
         -------
 
@@ -63,7 +66,15 @@ class InterfaceGroup(object):
         ----------
         group : str
         """
-        self.meta = Table(self.hdf[group+'/meta'].value)
+        import json
+        self.meta = spdbu.hdf_decode(self.hdf[group+'/meta'].value, itype='Table')
+        # Attributes
+        self.meta_attr = {}
+        for key in self.hdf[group+'/meta'].attrs.keys():
+            if 'SSA' in key:
+                self.meta_attr[key] = json.loads(spdbu.hdf_decode(self.hdf[group+'/meta'].attrs[key]))
+            else:
+                self.meta_attr[key] = spdbu.hdf_decode(self.hdf[group+'/meta'].attrs[key])
         # Reformat
         if reformat:
             try:
@@ -79,6 +90,27 @@ class InterfaceGroup(object):
             self.meta['WV_MAX'].format = '6.1f'
         # Add group
         self.meta.meta['group'] = group
+
+    def groupids_to_rows(self, group_IDs):
+        """ Convert GROUP_ID values to rows in the meta table
+        Mainly used to then grab the corresponding spectra
+
+        Parameters
+        ----------
+        group_IDs : int or ndarray
+
+        Returns
+        -------
+        rows : ndarray
+
+        """
+        # Checking
+        if isinstance(group_IDs, int):
+            group_IDs = np.array([group_IDs])  # Insures meta and other arrays are proper
+        # Find rows
+        rows = match_ids(group_IDs, self.meta['GROUP_ID'])
+        # Return
+        return rows
 
     def ids_to_firstrow(self, IDs):
         """ Given an input set of IDs, pass back the array of rows that
@@ -111,8 +143,6 @@ class InterfaceGroup(object):
         ypos = np.searchsorted(gdi, IDs, sorter=xsorted)
         indices = xsorted[ypos]  # Location in subset of meta table
         # Store and return
-        #self.sub_meta = self.meta[match_survey][indices] # only the first entry in table
-        #self.indices = indices
         rows = np.where(match_group)[0][indices]
         return rows
 
@@ -150,28 +180,10 @@ class InterfaceGroup(object):
         match_survey = np.in1d(self.meta[self.idkey], IDs)
         return np.where(match_survey)[0]
 
-    def cut_meta(self, IDs, first=True):
-        """ Grab meta data
-        Parameters
-        ----------
-        IDs : int or array
-          Return full table if None
+    def grab_specmeta(self, rows, verbose=None, **kwargs):
+        """ Grab the spectra and meta data for an input set of rows
+        Aligned to the rows input
 
-        Returns
-        -------
-        meta : Table(s)
-
-        """
-        # Grab meta table
-        if first:
-            rows = self.ids_to_firstrow(IDs)
-        else:
-            rows = self.ids_to_allrows(IDs)
-        cut_meta = self.meta[rows]
-        return cut_meta
-
-    def grab_specmeta(self, rows, **kwargs):
-        """
         Parameters
         ----------
         rows : int or ndarray
@@ -181,13 +193,12 @@ class InterfaceGroup(object):
         Returns
         -------
         spec : XSpectrum1D
-          Spectra requested, ordered by the rows
-        meta : Table
-          Meta table, ordered by the rows
+          Spectra requested, ordered by the input rows
+        meta : Table  -- THIS MAY BE DEPRECATED
+          Meta table, ordered by the input rows
         """
         if isinstance(rows, int):
             rows = np.array([rows])  # Insures meta and other arrays are proper
-        verbose = kwargs['verbose']
         if verbose is None:
             verbose = self.verbose
         # Check memory
@@ -267,6 +278,50 @@ class InterfaceGroup(object):
         # Return
         return spec, self.meta
 
+    def meta_from_ids(self, IDs, first=True):
+        """ Grab meta data given a list of IDs
+
+        Parameters
+        ----------
+        IDs : int or array
+          Return full table if None
+        first : bool, optional
+          Grab only the first row matching?
+
+        Returns
+        -------
+        meta : Table(s)
+          If first=True, aligned to input IDs
+
+        """
+        # Grab meta table
+        if first:
+            rows = self.ids_to_firstrow(IDs)
+        else:
+            rows = self.ids_to_allrows(IDs)
+        cut_meta = self.meta[rows]
+        return cut_meta
+
+    def query_meta(self, qdict, **kwargs):
+        """
+        Parameters
+        ----------
+        qdict : dict
+          Query_dict
+
+        Returns
+        -------
+        matches : bool array
+        sub_meta : Table
+          Subset of the meta table matching the query
+        IDs : int ndarray
+        """
+        # Query
+        matches = spdbu.query_table(self.meta, qdict, tbl_name='meta data')
+
+        # Return
+        return matches, self.meta[matches], self.meta[self.idkey][matches].data
+
     def show_meta(self, imeta=None, meta_keys=None):
         """ Nicely format and show the meta table
         Parameters
@@ -281,6 +336,24 @@ class InterfaceGroup(object):
             imeta = self.meta
         # Show
         show_group_meta()
+
+    def spec_from_meta(self, meta):
+        """ Return spectra aligned to input meta table
+
+        Parameters
+        ----------
+        meta : Table
+
+        Returns
+        -------
+        spectra : XSpectrum1D
+
+        """
+        rows = self.groupids_to_rows(meta['GROUP_ID'])
+        # Grab spectra
+        spec, _ = self.grab_specmeta(rows)
+        # Return
+        return spec
 
     def stage_data(self, rows, verbose=None, **kwargs):
         """ Stage the spectra for serving
@@ -310,7 +383,6 @@ class InterfaceGroup(object):
             if verbose:
                 print("Staged {:d} spectra totalling {:g} Gb".format(len(rows), new_memory))
             return True
-
 
     def update(self):
         """ Update key attributes

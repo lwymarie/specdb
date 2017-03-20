@@ -7,7 +7,9 @@ Welcome to the specdb documentation!
 ====================================
 
 
-specdb is package for accessing spectra of astronomical sources.
+specdb is a software package for generating
+and interfacing with databases
+of spectra from astronomical sources.
 
 
 Getting Started
@@ -17,26 +19,43 @@ Getting Started
    :maxdepth: 2
 
    installing
-   scripts
-   usage
 
-Databases
----------
+Using specdb with a Database
+----------------------------
 
 .. toctree::
    :maxdepth: 2
 
-   igmspec
+   scripts
+   usage
 
-Data
-----
+Accessing Data
+--------------
 
 .. toctree::
    :maxdepth: 2
 
    catalog
+   groups
    meta
    spectra
+
+specdb Databases
+----------------
+
+.. toctree::
+   :maxdepth: 2
+
+   igmspec
+   uvqs
+
+IVOA
+----
+
+.. toctree::
+   :maxdepth: 2
+
+   ssa
 
 Generating a Database
 ---------------------

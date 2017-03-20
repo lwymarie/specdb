@@ -22,7 +22,8 @@ from linetools.spectra.xspectrum1d import XSpectrum1D
 from specdb.build import utils as spbu
 from specdb.zem import utils as spzu
 from specdb import defs
-from specdb.build.utils import add_ids, write_hdf
+from specdb.build.utils import add_ids, write_hdf, set_sv_idkey
+from specdb.ssa import default_fields
 
 try:
     basestring
@@ -32,7 +33,7 @@ except NameError:  # For Python 3
 
 def grab_files(branch, skip_files=('c.fits', 'C.fits', 'e.fits',
                                       'E.fits', 'N.fits', 'old.fits'),
-               only_conti=False, skip_folders=[]):
+               only_conti=False, skip_folders=[], verbose=False):
     """ Generate a list of FITS files within the file tree
 
     Parameters
@@ -50,16 +51,23 @@ def grab_files(branch, skip_files=('c.fits', 'C.fits', 'e.fits',
     -------
     pfiles : list
       List of FITS files
-    meta_file : str or None
-      Name of meta file in tree_root
+    out_tuple : tuple
+      meta_file : str or None
+        Name of meta JSON file in tree_root
+      mtbl_file : str or None
+        Name of meta table file in tree_root
+        Must have either _meta.ascii or _meta.fits extension
+      ssa_file : str or None
+        Name of JSON file for SSA information
+          -- Must contain Title, flux, fxcalib keys
     """
     walk = os.walk(branch)
     folders = ['/.']
     pfiles = []
     while len(folders) > 0:
         # Search for fits files
-        ofiles = []
         for folder in folders:
+            ofiles = []
             if folder in skip_folders:
                 print("Skipping folder = {:s}".format(folder))
                 continue
@@ -77,13 +85,16 @@ def grab_files(branch, skip_files=('c.fits', 'C.fits', 'e.fits',
                 #
                 if only_conti:
                     ofile = ofile.replace('_c','')
-                    if not os.path.isfile(ofile):
-                        print("{:s} not present".format(ofile))
+                    if (not os.path.isfile(ofile)) and (not os.path.isfile(ofile+'.gz')):
+                        raise ValueError("{:s} not present".format(ofile))
+                        flg=False
                 if flg:
                     pfiles.append(ofile)
         # walk
         folders = next(walk)[1]
-    # Grab meta file (if one exists)
+        if verbose:
+            print("Will walk through folders {}".format(folders))
+    # Dict for meta parsing
     mfile = glob.glob(branch+'/*_meta.json')
     if len(mfile) == 1:
         mfile = mfile[0]
@@ -92,12 +103,25 @@ def grab_files(branch, skip_files=('c.fits', 'C.fits', 'e.fits',
         mfile = None
     else:
         raise IOError("Multiple meta JSON files in branch: {:s}.  Limit to one".format(branch))
+    # Meta Table
+    mtbl_file = glob.glob(branch+'/*_meta.ascii') + glob.glob(branch+'/*_meta.fits')
+    if len(mtbl_file) == 1:
+        mtbl_file = mtbl_file[0]
+    else:
+        mtbl_file = None
+    # SSA file
+    ssa_files = glob.glob(branch+'/*_ssa.json')
+    if len(ssa_files) == 1:
+        ssa_file = ssa_files[0]
+    else:
+        ssa_file = None
     # Return
-    return pfiles, mfile
+    return pfiles, (mfile, mtbl_file, ssa_file)
 
 
 def mk_meta(files, ztbl, fname=False, stype='QSO', skip_badz=False,
             mdict=None, parse_head=None, debug=False, chkz=False,
+            mtbl_file=None,
             verbose=False, specdb=None, sdb_key=None, **kwargs):
     """ Generate a meta Table from an input list of files
 
@@ -128,6 +152,10 @@ def mk_meta(files, ztbl, fname=False, stype='QSO', skip_badz=False,
       Input meta data in dict form e.g.  mdict=dict(INSTR='ESI')
     chkz : bool, optional
       If any sources have no parseable redshift, hit a set_trace
+    mtbl_file : str
+      Filename of input meta table.  Current allowed extensions are _meta.ascii or _meta.fits
+      and they must be readable by Table.read().  The values in this table will overwrite
+      any others generated.  Table must include a SPEC_FILE column to link meta data
 
     Returns
     -------
@@ -140,7 +168,10 @@ def mk_meta(files, ztbl, fname=False, stype='QSO', skip_badz=False,
     Rdicts = defs.get_res_dicts()
     #
     coordlist = []
+    snames = []
     for ifile in files:
+        sname = ifile.split('/')[-1]
+        snames.append(sname)
         if fname:
             # Starting index
             if 'SDSSJ' in ifile:
@@ -164,7 +195,6 @@ def mk_meta(files, ztbl, fname=False, stype='QSO', skip_badz=False,
             except (UnboundLocalError, ValueError):
                 pdb.set_trace()
         else:
-            sname = ifile.split('/')[-1]
             mt = np.where(ztbl['SPEC_FILE'] == sname)[0]
             if len(mt) != 1:
                 raise IndexError("NO MATCH FOR {:s}".format(sname))
@@ -196,7 +226,7 @@ def mk_meta(files, ztbl, fname=False, stype='QSO', skip_badz=False,
             else:
                 raise ValueError("{:d} entries without a parseable redshift".format(
                     np.sum(badz)))
-    meta['zem'] = zem
+    meta['zem_GROUP'] = zem
     meta['sig_zem'] = 0.  # Need to add
     meta['flag_zem'] = zsource
     # Cut
@@ -225,6 +255,7 @@ def mk_meta(files, ztbl, fname=False, stype='QSO', skip_badz=False,
 
     # SPEC_FILE
     meta['SPEC_FILE'] = np.array(files)[~badz]
+    root_names = np.array(snames)[~badz]
 
     # Try Header?
     if parse_head is not None:
@@ -265,8 +296,8 @@ def mk_meta(files, ztbl, fname=False, stype='QSO', skip_badz=False,
             except KeyError:
                 instr = 'none'
             if 'LRIS' in instr:
-                if 'GRATING' not in plist.keys():
-                    plist['GRATING'] = []
+                if 'DISPERSER' not in plist.keys():
+                    plist['DISPERSER'] = []
                     plist['INSTR'] = []
                     plist['R'] = []
                 try:
@@ -277,13 +308,13 @@ def mk_meta(files, ztbl, fname=False, stype='QSO', skip_badz=False,
                     else:
                         det = 'LRIS-B'
                 if 'LRIS-R' in det:
-                    plist['GRATING'].append(head['GRANAME'])
+                    plist['DISPERSER'].append(head['GRANAME'])
                     plist['INSTR'].append('LRISr')
                 else:
-                    plist['GRATING'].append(head['GRISNAME'])
+                    plist['DISPERSER'].append(head['GRISNAME'])
                     plist['INSTR'].append('LRISb')
                 # Resolution
-                res = Rdicts[plist['INSTR'][-1]][plist['GRATING'][-1]]
+                res = Rdicts[plist['INSTR'][-1]][plist['DISPERSER'][-1]]
                 try:
                     sname = head['SLITNAME']
                 except KeyError:
@@ -319,6 +350,42 @@ def mk_meta(files, ztbl, fname=False, stype='QSO', skip_badz=False,
                 else:
                     meta[clm] = ['DUMMY']*len(meta)
 
+    # Input meta table
+    if mtbl_file is not None:
+        # Read
+        if '_meta.ascii' in mtbl_file:
+            imtbl = Table.read(mtbl_file, format='ascii')
+        elif '_meta.fits' in mtbl_file:
+            imtbl = Table.read(mtbl_file)
+        else:
+            raise IOError("Input meta table must have either an ascii or fits extension")
+        # Check length
+        if len(imtbl) != len(meta):
+            raise IOError("Input meta table must have same length as self-generated one")
+        # Check for SPEC_FILE
+        if 'SPEC_FILE' not in imtbl.keys():
+            raise ValueError("Input meta table must include SPEC_FILE column")
+        # Loop to get indices
+        idx = []
+        for row in imtbl:
+            imt = np.where(root_names == row['SPEC_FILE'])[0]
+            if len(imt) == 0:
+                print("No match to spec file {:s}.  Will ignore".format(row['SPEC_FILE']))
+            elif len(imt) == 1:
+                idx.append(imt[0])
+            else:
+                raise ValueError("Two entries with the same SPEC_FILE.  Something went wrong..")
+        idx = np.array(idx)
+        # Loop on keys
+        for key in imtbl.keys():
+            # Skip?
+            if key in ['SPEC_FILE']:
+                continue
+            if key in meta.keys():
+                pdb.set_trace()
+            else:
+                # Add Column
+                meta.add_column(imtbl[key][idx])
     # Return
     if debug:
         meta[['RA_GROUP', 'DEC_GROUP', 'SPEC_FILE']].pprint(max_width=120)
@@ -340,7 +407,7 @@ def dumb_spec():
 
 
 def ingest_spectra(hdf, sname, meta, max_npix=10000, chk_meta_only=False,
-                   refs=None, verbose=False, badf=None,
+                   refs=None, verbose=False, badf=None, set_idkey=None,
                    grab_conti=False, **kwargs):
     """ Ingest the spectra
     Parameters
@@ -359,11 +426,15 @@ def ingest_spectra(hdf, sname, meta, max_npix=10000, chk_meta_only=False,
       List of bad spectra [use only if you know what you are doing!]
     grab_conti : bool, optional
       Grab continua.  They should exist but do not have to
+    set_idkey : str, optional
+      Only required if you are not performing the full script
 
     Returns
     -------
 
     """
+    if set_idkey is not None:
+        set_sv_idkey(set_idkey)
     # Add Survey
     print("Adding {:s} group to DB".format(sname))
     grp = hdf.create_group(sname)
@@ -447,7 +518,8 @@ def ingest_spectra(hdf, sname, meta, max_npix=10000, chk_meta_only=False,
     return
 
 
-def mk_db(dbname, tree, outfil, iztbl, version='v00', **kwargs):
+def mk_db(dbname, tree, outfil, iztbl, version='v00', id_key='PRIV_ID',
+          publisher='Unknown', **kwargs):
     """ Generate the DB
 
     Parameters
@@ -493,7 +565,7 @@ def mk_db(dbname, tree, outfil, iztbl, version='v00', **kwargs):
     gdict = {}
 
     # Main DB Table
-    maindb, tkeys = spbu.start_maindb('PRIV_ID')
+    maindb, tkeys = spbu.start_maindb(id_key)
 
     # MAIN LOOP
     for ss,branch in enumerate(branches):
@@ -502,7 +574,9 @@ def mk_db(dbname, tree, outfil, iztbl, version='v00', **kwargs):
             continue
         print('Working on branch: {:s}'.format(branch))
         # Files
-        fits_files, meta_file = grab_files(branch)
+        fits_files, out_tup = grab_files(branch)
+        meta_file, mtbl_file, ssa_file = out_tup
+
         # Meta
         maxpix, phead, mdict, stype = 10000, None, None, 'QSO'
         if meta_file is not None:
@@ -519,7 +593,7 @@ def mk_db(dbname, tree, outfil, iztbl, version='v00', **kwargs):
                 phead = meta_dict['parse_head']
             if 'meta_dict' in meta_dict.keys():
                 mdict = meta_dict['meta_dict']
-        full_meta = mk_meta(fits_files, ztbl,
+        full_meta = mk_meta(fits_files, ztbl, mtbl_file=mtbl_file,
                             parse_head=phead, mdict=mdict, **kwargs)
         # Update group dict
         group_name = branch.split('/')[-1]
@@ -528,9 +602,21 @@ def mk_db(dbname, tree, outfil, iztbl, version='v00', **kwargs):
         maindb = add_ids(maindb, full_meta, flag_g, tkeys, 'PRIV_ID', first=(flag_g==1))
         # Ingest
         ingest_spectra(hdf, group_name, full_meta, max_npix=maxpix, **kwargs)
+        # SSA
+        if ssa_file is not None:
+            user_ssa = ltu.loadjson(ssa_file)
+            ssa_dict = default_fields(user_ssa['Title'], flux=user_ssa['flux'], fxcalib=user_ssa['fxcalib'])
+            hdf[group_name]['meta'].attrs['SSA'] = json.dumps(ltu.jsonify(ssa_dict))
+
+    # Check stacking
+    if not spbu.chk_vstack(hdf):
+        print("Meta data will not stack using specdb.utils.clean_vstack")
+        print("Proceed to write at your own risk..")
+        pdb.set_trace()
 
     # Write
-    write_hdf(hdf, dbname, maindb, zpri, gdict, version)
+    write_hdf(hdf, str(dbname), maindb, zpri, gdict, version,
+              Publisher=publisher)
     print("Wrote {:s} DB file".format(outfil))
 
 
